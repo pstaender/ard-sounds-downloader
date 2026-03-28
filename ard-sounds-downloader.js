@@ -16,10 +16,11 @@ export class ArdSoundsDownloader {
   }
 
   async #downloadFile(url, filename, allowedMimeTypeRegex) {
-    const coverResponse = await fetch(url);
-    const contentType = coverResponse.headers.get("content-type") || "";
+    const response = await fetch(url);
+    const contentType = response.headers.get("content-type") || "";
+    let urlFilename = new URL(url).pathname.split(".").at(-1);
     let fileExtension =
-      new URL(url).pathname.split(".").at(-1) || contentType.split("/").at(-1);
+      urlFilename.length <= 4 ? urlFilename : contentType.split("/").at(-1);
 
     if (!allowedMimeTypeRegex.test(contentType)) {
       return null;
@@ -29,9 +30,9 @@ export class ArdSoundsDownloader {
       fileExtension = "mp3";
     }
 
-    const coverBuffer = await coverResponse.arrayBuffer();
+    const fileBuffer = await response.arrayBuffer();
     const outputFilename = filename.replace("{file_extension}", fileExtension);
-    await Bun.write(outputFilename, new Uint8Array(coverBuffer));
+    await Bun.write(outputFilename, new Uint8Array(fileBuffer));
     return outputFilename;
   }
 
