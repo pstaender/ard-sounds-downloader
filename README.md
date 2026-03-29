@@ -5,6 +5,8 @@
 ## Requirements
 
 - [bun](https://bun.sh/)
+- posix/linux/macos (windows not supported, yet)
+- optional: ffmpeg (for adding metadata to mp4 and dowloading audio-streams)
 
 ## Installation
 
@@ -29,7 +31,7 @@ Download with the following command:
 bun run download-ard-sounds-show.js --id urn:ard:show:bbb7635a8c2dd75e
 ```
 
-or use the complete url having the show id included:
+You can also use the complete url having the show id included:
 
 ```bash
 bun run download-ard-sounds-show.js --id https://www.ardsounds.de/sendung/sherlock-holmes-krimi-hoerspielklassiker-nach-sir-arthur-conan-doyle/urn:ard:show:bbb7635a8c2dd75e/

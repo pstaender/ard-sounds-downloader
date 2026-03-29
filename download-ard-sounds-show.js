@@ -1,7 +1,8 @@
 import { parseArgs } from "util";
 import { ArdSoundsDownloader } from "./ard-sounds-downloader";
+import { $ } from "bun";
 
-const { values, positionals } = parseArgs({
+const { values } = parseArgs({
   args: Bun.argv,
   options: {
     id: {
@@ -33,7 +34,15 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
 });
 
-new ArdSoundsDownloader().downloadShow(values.id, {
+const downloader = new ArdSoundsDownloader();
+
+try {
+  if (await $`which ffmpeg`.quiet()) {
+    downloader.enableFFMpeg();
+  }
+} catch (_) {}
+
+downloader.downloadShow(values.id, {
   targetFolder: values.targetFolder,
   filename: values.filename,
   limit: parseInt(values.limit),

@@ -1,18 +1,25 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, exists } from "node:fs/promises";
 import { homedir } from "node:os";
 import { request } from "graphql-request";
 import * as schemas from "./schemas";
 import sanitize from "sanitize-filename";
-import { stderr, stdout } from "node:process";
+import { Glob } from "bun";
+import { JSDOM } from "jsdom";
+import { $ } from "bun";
 import NodeID3 from "node-id3";
 import mime from "mime";
 
 export class ArdSoundsDownloader {
   #storeJSONData = true;
-  #overwriteExistingAudioFiles = false; /* currently only working for mp3 file(s) */
+  #overwriteExistingFolders = false;
+  #useFFMpeg = false;
 
   #sanitizeFilename(filename) {
     return sanitize(filename.replace(/(\d+)\/(\d+)/g, "$1 von $2"));
+  }
+
+  enableFFMpeg() {
+    this.#useFFMpeg = true;
   }
 
   async #downloadFile(url, filename, allowedMimeTypeRegex) {
@@ -22,12 +29,25 @@ export class ArdSoundsDownloader {
     let fileExtension =
       urlFilename.length <= 4 ? urlFilename : contentType.split("/").at(-1);
 
-    if (!allowedMimeTypeRegex.test(contentType)) {
+    if (this.#useFFMpeg && fileExtension === "m3u8") {
+      // download stream
+      fileExtension = "mp4";
+      const outputFilename = filename.replace(
+        "{file_extension}",
+        fileExtension,
+      );
+      await $`ffmpeg -i ${url} -c copy ${outputFilename}`;
+      return outputFilename;
+    } else if (
+      fileExtension === "mpeg" ||
+      (/(octet-stream|x-mpegURL)/.test(contentType) &&
+        urlFilename.match(/(mp3|mp4)$/i))
+    ) {
+      // download octet-stream also as mp3 or mp4, depending on url
+      fileExtension = urlFilename;
+    } else if (!allowedMimeTypeRegex.test(contentType)) {
+      console.error(`${urlFilename} mimetype ${contentType} not allowed`);
       return null;
-    }
-
-    if (fileExtension === "mpeg" || contentType.match(/octet-stream/)) {
-      fileExtension = "mp3";
     }
 
     const fileBuffer = await response.arrayBuffer();
@@ -66,7 +86,12 @@ export class ArdSoundsDownloader {
   }
 
   async #processAudio(audio, node, audioFilename, coverFile, index) {
-    if (!audio.allowDownload) return;
+    // if (!audio.allowDownload) return;
+
+    if (index > 1 && /\.mp3$/i.test(audio.downloadUrl || audio.url)) {
+      // mp3 is no alternate format
+      return;
+    }
 
     let numberedFilename = `${audioFilename.replace(
       "{title}",
@@ -77,25 +102,16 @@ export class ArdSoundsDownloader {
 
     numberedFilename = this.#replacePlaceholders(numberedFilename, node);
 
-    if (!this.#overwriteExistingAudioFiles) {
-      if (await Bun.file(numberedFilename + ".mp3").exists()) {
-        stdout.write("s");
-        return;
-      }
-    }
-
     let audioFile = await this.#downloadFile(
-      audio.downloadUrl,
+      audio.downloadUrl || audio.url,
       numberedFilename,
       /^(audio|video)\//i,
     );
 
     if (!audioFile) {
-      console.error("m");
+      console.error("No audio file found.");
       return;
     }
-
-    console.debug(audioFile);
 
     if (audioFile.match(/\.mp3$/i)) {
       const success = NodeID3.write(
@@ -122,22 +138,23 @@ export class ArdSoundsDownloader {
         audioFile,
       );
       if (!success) {
-        console.error("t");
+        console.error("id3tag problem.");
+        return null;
       }
     }
+    return audioFile;
   }
 
   async #processNode(
     node,
     { outputTemplate, filenameTemplate, destinationFolder },
   ) {
-    if (!node.audios) return destinationFolder;
-
-    const folder = this.#replacePlaceholders(outputTemplate, node);
-    if (destinationFolder !== folder) {
-      destinationFolder = folder;
-      await mkdir(destinationFolder, { recursive: true });
+    if (!node.audios) {
+      console.warn(`No audios found, continuing with next episode`);
+      return;
     }
+
+    await mkdir(destinationFolder, { recursive: true });
 
     const coverUrl = node.image?.url?.replace(/\?.+$/, "");
     const coverFile = await this.#downloadFile(
@@ -163,15 +180,35 @@ export class ArdSoundsDownloader {
 
     let i = 1;
     for (const audio of node.audios) {
-      const audioFilename =
-        `${destinationFolder}/` +
-        filenameTemplate.replace("{title}", "{title}"); // keep placeholder for #processAudio
+      const audioFilename = `${destinationFolder}/` + filenameTemplate; // keep placeholder for #processAudio
       try {
-        await this.#processAudio(audio, node, audioFilename, coverFile, i);
+        let finalAudioFile = await this.#processAudio(
+          audio,
+          node,
+          audioFilename,
+          coverFile,
+          i,
+        );
+        if (!finalAudioFile) {
+          continue;
+        }
+        console.log(`-> ${finalAudioFile}`);
         i++;
       } catch (e) {
         console.error(e.message);
       }
+    }
+
+    // process additional metadata for mp4 files
+    try {
+      await this.#processAdditionalMetaDataForMp4(
+        node,
+        filenameOfEpisode.replace(/\/[^\/]+?\.{file_extension}/, "/"),
+        coverFile,
+        filenameOfEpisode.replace("{file_extension}", "txt"),
+      );
+    } catch (e) {
+      console.error(e);
     }
 
     if (coverFile) {
@@ -179,6 +216,69 @@ export class ArdSoundsDownloader {
     }
 
     return destinationFolder;
+  }
+
+  async #processAdditionalMetaDataForMp4(node, folder, coverFile, txtFile) {
+    const glob = new Glob(`${folder}/*.{mp4}`);
+
+    let mp4Files = [];
+    for await (const file of glob.scan(".")) {
+      mp4Files.push(file);
+    }
+
+    const episodeUrl = `https://www.ardsounds.de${node.path}`;
+
+    let html = await (await fetch(episodeUrl)).text();
+
+    const dom = new JSDOM(html);
+
+    const title = dom.window.document.querySelector("section h1").textContent;
+
+    const description = dom.window.document.querySelector(
+      "section:nth-of-type(1) p",
+    ).textContent;
+
+    const summary = dom.window.document.querySelector(
+      "section:nth-of-type(1) h1 + *",
+    )?.textContent;
+
+    const md = `# ${title}\n\n${[summary, description].filter((v) => !!v).join("\n\n")}`;
+    console.debug(`-> ${txtFile}`);
+    Bun.file(txtFile).write(md);
+
+    if (!this.#useFFMpeg) {
+      return;
+    }
+
+    for (const mp4File of mp4Files) {
+      const copy1 = mp4File.replace(/\.mp4/, "_tmp1.mp4");
+      const copy2 = mp4File.replace(/\.mp4/, "_tmp2.mp4");
+
+      console.debug(
+        `ffmpeg -y -i ${mp4File} -i ${coverFile} -map 1 -map 0 -c copy -disposition:0 attached_pic ${copy1}`,
+      );
+
+      await $`ffmpeg -y -i ${mp4File} -i ${coverFile} -map 1 -map 0 -c copy -disposition:0 attached_pic ${copy1}`;
+      await $`ffmpeg -y -i ${copy1} -metadata title=${node.title || title} -metadata artist=${[
+        node.programSet?.publicationService?.title,
+        node.programSet?.publicationService?.genre,
+      ]
+        .filter((v) => !!v)
+        .join(
+          " ",
+        )} -metadata album=${node.programSet?.title} -metadata comment=${[summary, description].filter((v) => !!v).join("\n\n")} -metadata genre=${node.programSet?.publicationService?.genre} -codec copy ${copy2}`;
+
+      if (await Bun.file(copy2).exists()) {
+        await $`mv ${copy2} ${mp4File}`;
+        console.debug(`=> ${mp4File}`);
+      } else if (await Bun.file(copy1).exists()) {
+        await $`mv ${copy1} ${mp4File}`;
+        console.debug(`=> ${mp4File}`);
+      }
+      if (await Bun.file(copy1).exists()) {
+        await Bun.file(copy1).delete();
+      }
+    }
   }
 
   async downloadShow(
@@ -196,7 +296,6 @@ export class ArdSoundsDownloader {
 
     let stopDownload = false;
     let page = 0;
-    let destinationFolder = null;
 
     while (!stopDownload) {
       const variables = {
@@ -212,8 +311,25 @@ export class ArdSoundsDownloader {
       );
 
       for (const node of result.items.nodes) {
-        destinationFolder = await this.#processNode(node, {
-          outputTemplate: targetFolder,
+        let outputTemplate = targetFolder;
+        let destinationFolder = this.#replacePlaceholders(outputTemplate, node);
+
+        if (!this.#overwriteExistingFolders) {
+          let downloadFolder = this.#replacePlaceholders(
+            `${destinationFolder}/` + filename,
+            node,
+          )
+            .split("/")
+            .filter((v) => !v.includes(".{file_extension}"))
+            .join("/");
+          if (await exists(downloadFolder)) {
+            console.debug(`skipping existing folder '${downloadFolder}'`);
+            continue;
+          }
+        }
+
+        await this.#processNode(node, {
+          outputTemplate,
           filenameTemplate: filename,
           destinationFolder,
         });
