@@ -5,8 +5,8 @@
 ## Requirements
 
 - [bun](https://bun.sh/)
-- posix/linux/macos (windows not supported, yet)
-- optional: ffmpeg (for adding metadata to mp4 and dowloading audio-streams)
+- posix/linux/macos (windows not supported, should be working via WSL)
+- optional: [ffmpeg](https://ffmpeg.org/download.html) (for adding metadata to mp4 and downloading audio-streams)
 
 ## Installation
 
@@ -54,6 +54,10 @@ for id in urn:ard:show:5012a809f8b1971e urn:ard:show:cf53134d704651ea …; do
   bun run download-ard-sounds-show.js --id $id;
 done
 ```
+
+<img width="738" height="226" alt="Screenshot 2026-03-29 at 12 17 45" src="https://github.com/user-attachments/assets/d6cef0ed-89b2-4d7c-8892-5b8f27076559" />
+<img width="1158" height="712" alt="Screenshot 2026-03-29 at 12 42 13" src="https://github.com/user-attachments/assets/362361cb-dfa0-439c-8a46-e2fb627525df" />
+
 
 ## Disclaimer
 
