@@ -5,8 +5,8 @@
 ## Requirements
 
 - [bun](https://bun.sh/)
-- posix/linux/macos (windows not supported, yet)
-- optional: ffmpeg (for adding metadata to mp4 and dowloading audio-streams)
+- posix/linux/macos (windows not supported, should be working via WSL)
+- optional: [ffmpeg](https://ffmpeg.org/download.html) (for adding metadata to mp4 and downloading audio-streams)
 
 ## Installation
 
