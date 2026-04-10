@@ -13,6 +13,7 @@ export class ArdSoundsDownloader {
   #storeJSONData = true;
   #overwriteExistingFolders = false;
   #useFFMpeg = false;
+  #downloadPodcastCover = false;
 
   #sanitizeFilename(filename) {
     return sanitize(filename.replace(/(\d+)\/(\d+)/g, "$1 von $2"));
@@ -20,6 +21,10 @@ export class ArdSoundsDownloader {
 
   enableFFMpeg() {
     this.#useFFMpeg = true;
+  }
+
+  enablePodcastCoverDownload() {
+    this.#downloadPodcastCover = true;
   }
 
   async #downloadFile(url, filename, allowedMimeTypeRegex) {
@@ -281,15 +286,38 @@ export class ArdSoundsDownloader {
     }
   }
 
+  async #downloadCover(node, targetFolder, overwriteExistingFile = false) {
+    const showUrl = `https://www.ardsounds.de/${node.programSet.path}/`;
+
+    let html = await (await fetch(showUrl)).text();
+
+    const dom = new JSDOM(html);
+
+    const { src, srcset } = dom.window.document.querySelector(
+      `section img[itemprop="image"]`,
+    );
+
+    let url = (src || srcset.split(/(\s,)/)[0]).replace(/\?.+$/, "");
+    let coverFilename = targetFolder.split("/");
+    coverFilename.pop();
+    coverFilename = coverFilename.join("/");
+    coverFilename += `/cover.{file_extension}`;
+    if (!overwriteExistingFile) {
+      // check cover file exists
+      const glob = new Glob(
+        coverFilename.replace("{file_extension}", "{avif,png,jpg,jpeg,webp}"),
+      );
+      for await (const filename of glob.scan(".")) {
+        console.debug(`skipping existing cover '${filename}'`);
+        return filename;
+      }
+    }
+    return await this.#downloadFile(url, coverFilename, /^image\//);
+  }
+
   async downloadShow(
     id,
-    {
-      targetFolder = "~/ard_sounds_downloads/{programSet.publicationService.title} - {programSet.title}/{title}",
-      filename = "{title}.{file_extension}",
-      limit = 240,
-      offset = 0,
-      count = 24,
-    } = {},
+    { targetFolder, filename, limit, offset, count } = {},
   ) {
     const showID = this.#parseShowId(id);
     const document = schemas.audioPodcast;
@@ -309,6 +337,17 @@ export class ArdSoundsDownloader {
         document,
         variables,
       );
+
+      if (page === 0 && this.#downloadPodcastCover) {
+        let podcastCover = await this.#downloadCover(
+          result.items.nodes[0],
+          this.#replacePlaceholders(
+            targetFolder,
+            result.items.nodes[0],
+          ).replace(/\/{title}$/, ""),
+        );
+        console.log(`-> ${podcastCover}`);
+      }
 
       for (const node of result.items.nodes) {
         let outputTemplate = targetFolder;

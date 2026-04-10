@@ -23,6 +23,10 @@ const argOptions = {
     default:
       "~/ard_sounds_downloads/{programSet.publicationService.title} - {programSet.title}/{title}",
   },
+  downloadPodcastCover: {
+    type: "boolean",
+    default: false,
+  },
   help: {
     type: "boolean",
     short: "h",
@@ -45,13 +49,14 @@ if (values.help) {
 Usage: bun run download-ard-sounds-show.js [options]
 
 Options:
-  --id                The ID of the show to download (required), e.g. urn:ard:show:1b3dd6076b453726
-  --count             The number of episodes to download (default: ${argOptions.count.default})
-  --offset            The offset for pagination (default: ${argOptions.offset.default})
-  --limit             The maximum number of episodes to download (default: ${argOptions.limit.default})
-  --targetFolder      The target folder for downloads (default: "${argOptions.targetFolder.default}")
-  --filename          The filename template for downloads (default: "${argOptions.filename.default}")
-  -h, --help          Show this help message
+  --id                    The ID of the show to download (required), e.g. urn:ard:show:1b3dd6076b453726
+  --count                 The number of episodes to download (default: ${argOptions.count.default})
+  --offset                The offset for pagination (default: ${argOptions.offset.default})
+  --limit                 The maximum number of episodes to download (default: ${argOptions.limit.default})
+  --downloadPodcastCover  Whether to download the podcast cover (default: ${argOptions.downloadPodcastCover.default ? "true" : "false"})
+  --targetFolder          The target folder for downloads (default: "${argOptions.targetFolder.default}")
+  --filename              The filename template for downloads (default: "${argOptions.filename.default}")
+  -h, --help              Show this help message
 `);
   process.exit(0);
 }
@@ -63,6 +68,9 @@ try {
     downloader.enableFFMpeg();
   }
 } catch (_) {}
+if (values.downloadPodcastCover) {
+  downloader.enablePodcastCoverDownload();
+}
 
 downloader.downloadShow(values.id, {
   targetFolder: values.targetFolder,
